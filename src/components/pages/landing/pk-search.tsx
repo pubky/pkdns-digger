@@ -9,6 +9,11 @@ import { KeyAlert } from "./key-alert"
 import { Header } from "./header"
 import { Utils } from "@synonymdev/pkarr"
 
+// Extract the raw public key by removing "pk:" or "pubky" prefix
+function extractPublicKey(input: string): string {
+  return input.replace(/^(pk:\s*|pubky)/i, '').trim()
+}
+
 export function PkSearch() {
   const [query, setQuery] = useState("")
   const [isFocused, setIsFocused] = useState(false)
@@ -64,8 +69,7 @@ export function PkSearch() {
 
   // Handle search functionality with error control
   const handleSearch = async () => {
-    // Remove leading "pk:" and any following whitespace if present.
-    const trimmedQuery = query.replace(/^pk:\s*/i, '').trim()
+    const trimmedQuery = extractPublicKey(query)
 
     setError(null)
 
@@ -163,7 +167,7 @@ export function PkSearch() {
   // Check if current input is valid without setting error
   const isValidKey = (key: string): boolean => {
     const zbase32Regex = /^[13456789abcdefghijkmnopqrstuwxyz]+$/i
-    const trimmedKey = key.trim()
+    const trimmedKey = extractPublicKey(key)
     return trimmedKey.length === 52 && zbase32Regex.test(trimmedKey) && Utils.validatePublicKey(trimmedKey)
   }
 
