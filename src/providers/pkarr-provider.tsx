@@ -76,7 +76,14 @@ const initializePkarrClient = async (): Promise<Client> => {
   // Start new initialization
   singletonState.initializationPromise = Promise.resolve().then(() => {
     try {
-      const client = new Client()
+      let client: Client;
+      // Check if testnet environment variable is set at build time
+      if (process.env.NEXT_PUBLIC_TESTNET === 'true') {
+        const customRelays = ['http://localhost:15411'];
+        client = new Client(customRelays, 10000)
+      } else {
+        client = new Client()
+      }
       singletonState.client = client
       return client
     } catch (error) {
