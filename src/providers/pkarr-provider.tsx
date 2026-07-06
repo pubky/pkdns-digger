@@ -45,6 +45,15 @@ const PkarrContext = createContext<PkarrContextType | undefined>(undefined)
 // Helper functions
 const isServerSide = () => typeof window === 'undefined'
 
+const configuredRelays = (): string[] | null => {
+  const relays = process.env.NEXT_PUBLIC_PKARR_RELAYS
+    ?.split(',')
+    .map((relay) => relay.trim())
+    .filter(Boolean)
+
+  return relays?.length ? relays : null
+}
+
 const resetSingletonState = (): void => {
   singletonState.client = null
   singletonState.initializationFailed = false
@@ -76,7 +85,8 @@ const initializePkarrClient = async (): Promise<Client> => {
   // Start new initialization
   singletonState.initializationPromise = Promise.resolve().then(() => {
     try {
-      const client = new Client()
+      const relays = configuredRelays()
+      const client = relays ? new Client(relays) : new Client()
       singletonState.client = client
       return client
     } catch (error) {
