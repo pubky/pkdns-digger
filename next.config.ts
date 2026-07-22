@@ -31,11 +31,6 @@ const nextConfig: NextConfig = {
 
     return config;
   },
-  
-  // Ensure proper handling of experimental features
-  experimental: {
-    esmExternals: 'loose',
-  },
 };
 
 export default nextConfig;
