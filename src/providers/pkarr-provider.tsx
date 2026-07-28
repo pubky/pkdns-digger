@@ -1,164 +1,171 @@
 "use client"
 
-/**
- * PkarrProvider: React Context provider that manages a singleton Pkarr Client instance.
- * Handles client initialization, loading states, error handling, and retry logic.
- */
-
-import { Client } from '@synonymdev/pkarr'
-import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react'
-
+import { Client, ResolvePolicy, type SignedPacket } from "@synonymdev/pkarr"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
+import {
+  clearPkarrSettings,
+  DEFAULT_PKARR_SETTINGS,
+  environmentRelays,
+  loadPkarrSettings,
+  savePkarrSettings,
+  type PkarrSettings,
+} from "@/lib/pkarr-settings"
+import type { ResolvePolicyName } from "@/lib/resolve-policy"
 
 interface PkarrContextType {
-  client: Client | null
+  settings: PkarrSettings
+  environmentRelays: string[]
   isLoading: boolean
   error: string | null
+  resolve: (publicKey: string) => Promise<SignedPacket | null>
+  applySettings: (settings: PkarrSettings) => void
+  resetSettings: () => void
   retry: () => void
 }
 
-interface PkarrProviderProps {
-  children: ReactNode
+interface ManagedClient {
+  client: Client
+  pendingRequests: number
+  retired: boolean
+  freed: boolean
 }
 
-// Constants
-const ERRORS = {
-  INITIALIZATION_FAILED: 'Pkarr client failed to initialize. Please refresh the page.',
-  GENERIC: 'Failed to initialize pkarr client'
-} as const
-
-// Singleton state outside React
-interface SingletonState {
-  client: Client | null
-  initializationFailed: boolean
-  initializationPromise: Promise<Client> | null
-}
-
-const singletonState: SingletonState = {
-  client: null,
-  initializationFailed: false,
-  initializationPromise: null
-}
-
-// Context
+const INITIALIZATION_ERROR = "Pkarr client failed to initialize. Please check your relay settings."
 const PkarrContext = createContext<PkarrContextType | undefined>(undefined)
 
-// Helper functions
-const isServerSide = () => typeof window === 'undefined'
-
-const configuredRelays = (): string[] | null => {
-  const relays = process.env.NEXT_PUBLIC_PKARR_RELAYS
-    ?.split(',')
-    .map((relay) => relay.trim())
-    .filter(Boolean)
-
-  return relays?.length ? relays : null
-}
-
-const resetSingletonState = (): void => {
-  singletonState.client = null
-  singletonState.initializationFailed = false
-  // Avoids race condition
-  singletonState.initializationPromise = null
-}
-
-const initializePkarrClient = async (): Promise<Client> => {
-  // Return existing client
-  if (singletonState.client) {
-    return singletonState.client
-  }
-
-  // Don't retry if initialization already failed
-  if (singletonState.initializationFailed) {
-    throw new Error(ERRORS.INITIALIZATION_FAILED)
-  }
-
-  // Don't load on server side
-  if (isServerSide()) {
-    throw new Error('Server-side initialization not supported')
-  }
-
-  // Return existing promise if initialization is in progress
-  if (singletonState.initializationPromise) {
-    return await singletonState.initializationPromise
-  }
-
-  // Start new initialization
-  singletonState.initializationPromise = Promise.resolve().then(() => {
-    try {
-      const relays = configuredRelays()
-      const client = relays ? new Client(relays) : new Client()
-      singletonState.client = client
-      return client
-    } catch (error) {
-      singletonState.initializationFailed = true
-      console.error('Failed to create pkarr client:', error)
-      throw error
-    } finally {
-      singletonState.initializationPromise = null
-    }
-  })
-
-  return await singletonState.initializationPromise
-}
-
-// Provider Component
-export function PkarrProvider({ children }: PkarrProviderProps) {
-  const [client, setClient] = useState<Client | null>(singletonState.client)
+export function PkarrProvider({ children }: { children: ReactNode }) {
+  const configuredEnvironmentRelays = useMemo(environmentRelays, [])
+  const [settings, setSettings] = useState<PkarrSettings>(DEFAULT_PKARR_SETTINGS)
+  const [managedClient, setManagedClient] = useState<ManagedClient | null>(null)
+  const [isHydrated, setIsHydrated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [retryCount, setRetryCount] = useState(0)
+  const clientRef = useRef<ManagedClient | null>(null)
 
-  const handleInitialization = useCallback(async () => {
-    try {
-      setIsLoading(true)
-      setError(null)
-      
-      // Load client
-      const clientInstance = await initializePkarrClient()
-      
-      setClient(clientInstance)
-      
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : ERRORS.GENERIC
-      setError(errorMessage)
-      console.error('Pkarr client initialization failed:', err)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
-
-  const retry = useCallback(() => {
-    resetSingletonState()
-    handleInitialization()
-  }, [handleInitialization])
+  const effectiveRelays = settings.relays.length
+    ? settings.relays
+    : configuredEnvironmentRelays
+  const relayKey = effectiveRelays.join("\n")
 
   useEffect(() => {
-    handleInitialization()
-  }, [handleInitialization])
+    setSettings(loadPkarrSettings())
+    setIsHydrated(true)
+  }, [])
 
-  const contextValue: PkarrContextType = {
-    client,
+  useEffect(() => {
+    if (!isHydrated) return
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const client = effectiveRelays.length ? new Client(effectiveRelays) : new Client()
+      const nextClient: ManagedClient = {
+        client,
+        pendingRequests: 0,
+        retired: false,
+        freed: false,
+      }
+      const previousClient = clientRef.current
+
+      clientRef.current = nextClient
+      setManagedClient(nextClient)
+      retireClient(previousClient)
+      setIsLoading(false)
+    } catch (cause) {
+      console.error("Failed to create pkarr client:", cause)
+      setManagedClient(null)
+      clientRef.current = null
+      setError(cause instanceof Error ? cause.message : INITIALIZATION_ERROR)
+      setIsLoading(false)
+    }
+
+    return () => {
+      const client = clientRef.current
+      if (client) {
+        retireClient(client)
+        if (clientRef.current === client) clientRef.current = null
+      }
+    }
+    // relayKey intentionally represents the normalized relay configuration.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHydrated, relayKey, retryCount])
+
+  const resolve = useCallback(async (publicKey: string): Promise<SignedPacket | null> => {
+    if (!managedClient) throw new Error(INITIALIZATION_ERROR)
+
+    managedClient.pendingRequests += 1
+    try {
+      return await managedClient.client.resolve(publicKey, toResolvePolicy(settings.resolvePolicy))
+    } finally {
+      managedClient.pendingRequests -= 1
+      freeRetiredClient(managedClient)
+    }
+  }, [managedClient, settings.resolvePolicy])
+
+  const applySettings = useCallback((nextSettings: PkarrSettings) => {
+    const settingsCopy = { ...nextSettings, relays: [...nextSettings.relays] }
+    savePkarrSettings(settingsCopy)
+    setSettings(settingsCopy)
+  }, [])
+
+  const resetSettings = useCallback(() => {
+    clearPkarrSettings()
+    setSettings({ ...DEFAULT_PKARR_SETTINGS })
+  }, [])
+
+  const retry = useCallback(() => setRetryCount((count) => count + 1), [])
+
+  const value: PkarrContextType = {
+    settings,
+    environmentRelays: configuredEnvironmentRelays,
     isLoading,
     error,
-    retry
+    resolve,
+    applySettings,
+    resetSettings,
+    retry,
   }
 
-  return (
-    <PkarrContext.Provider value={contextValue}>
-      {children}
-    </PkarrContext.Provider>
-  )
+  return <PkarrContext.Provider value={value}>{children}</PkarrContext.Provider>
 }
 
-// Hook
 export function usePkarr(): PkarrContextType {
   const context = useContext(PkarrContext)
-  if (context === undefined) {
-    throw new Error('usePkarr must be used within a PkarrProvider')
-  }
+  if (!context) throw new Error("usePkarr must be used within a PkarrProvider")
   return context
 }
 
-// Export for non-React usage
-export async function getPkarrClient(): Promise<Client> {
-  return await initializePkarrClient()
-} 
+function retireClient(managedClient: ManagedClient | null): void {
+  if (!managedClient) return
+  managedClient.retired = true
+  freeRetiredClient(managedClient)
+}
+
+function freeRetiredClient(managedClient: ManagedClient): void {
+  if (managedClient.retired && managedClient.pendingRequests === 0 && !managedClient.freed) {
+    managedClient.freed = true
+    managedClient.client.free()
+  }
+}
+
+function toResolvePolicy(policy: ResolvePolicyName): ResolvePolicy {
+  switch (policy) {
+    case "cache-only":
+      return ResolvePolicy.CacheOnly
+    case "network-only":
+      return ResolvePolicy.NetworkOnly
+    case "cache-first":
+      return ResolvePolicy.CacheFirst
+  }
+}

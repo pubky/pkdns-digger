@@ -10,6 +10,7 @@ import { SkeletonRow } from "@/components/pages/records/row-skeleton"
 import { NoRecordsFound } from "@/components/pages/records/no-records-found"
 import { ClientError } from "@/components/client-error"
 import { usePkarr } from "@/providers/pkarr-provider"
+import { RESOLVE_POLICY_LABELS, type ResolvePolicyName } from "@/lib/resolve-policy"
 import { saveRecentKey } from "@/lib/utils"
 
 // Constants
@@ -22,6 +23,7 @@ type PkarrPacket = {
   records: DnsRecord[] | null
   lastUpdated: string | null
   compressedSize: number | null
+  resolvePolicy: ResolvePolicyName | null
 }
 
 export function PkResolver({ publicKey }: { publicKey: string }) {
@@ -29,48 +31,76 @@ export function PkResolver({ publicKey }: { publicKey: string }) {
     const router = useRouter()
 
     // Global pkarr client state
-    const { client, isLoading: clientLoading, error: clientError, retry } = usePkarr()
+    const { resolve, settings, isLoading: clientLoading, error: clientError, retry } = usePkarr()
 
     const [loading, setLoading] = useState(false)
     const [copied, setCopied] = useState(false)
+    const [resolutionError, setResolutionError] = useState<string | null>(null)
+    const [refreshCount, setRefreshCount] = useState(0)
     const [pkarrPacket, setPkarrPacket] = useState<PkarrPacket>({
         records: null,
         lastUpdated: null,
-        compressedSize: null
+        compressedSize: null,
+        resolvePolicy: null
     })
 
     useEffect(() => {
+        let cancelled = false;
+
         const fetchKeyData = async () => {
-            if (!publicKey || !client) return;
+            if (!publicKey || clientLoading || clientError) return;
 
             try {
                 setLoading(true);
-                const resolvedPacket = await client.resolve(publicKey);
+                setResolutionError(null);
+                const resolvePolicy = settings.resolvePolicy;
+                const resolvedPacket = await resolve(publicKey);
 
                 if (!resolvedPacket) {
+                    if (cancelled) return;
                     console.log("No packet found for key:", publicKey);
-                    setPkarrPacket({ records: null, lastUpdated: null, compressedSize: null });
+                    setPkarrPacket({ records: null, lastUpdated: null, compressedSize: null, resolvePolicy: null });
                     return;
                 }
 
-                // Save the key in local storage
-                saveRecentKey(publicKey)
+                try {
+                    if (cancelled) return;
 
-                setPkarrPacket({
-                    records: resolvedPacket.records.map(getDnsRecord),
-                    lastUpdated: new Date(resolvedPacket.timestampMs / 1000).toISOString(),
-                    compressedSize: resolvedPacket.compressedBytes().length
-                });
+                    // Save the key in local storage
+                    saveRecentKey(publicKey)
+                    setPkarrPacket({
+                        records: resolvedPacket.records.map(getDnsRecord),
+                        lastUpdated: new Date(resolvedPacket.timestampMs / 1000).toISOString(),
+                        compressedSize: resolvedPacket.compressedBytes().length,
+                        resolvePolicy
+                    });
+                } finally {
+                    resolvedPacket.free();
+                }
             } catch (err) {
+                if (cancelled) return;
                 console.error("Error fetching key data:", err);
-                setPkarrPacket({ records: null, lastUpdated: null, compressedSize: null });
+                setResolutionError(err instanceof Error ? err.message : "Failed to resolve this public key");
+                setPkarrPacket({ records: null, lastUpdated: null, compressedSize: null, resolvePolicy: null });
             } finally {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         };
 
         fetchKeyData();
-    }, [publicKey, client])
+
+        return () => {
+            cancelled = true;
+        };
+    }, [publicKey, resolve, settings.resolvePolicy, clientLoading, clientError, refreshCount])
+
+    const retryResolution = () => {
+        if (clientError) {
+            retry()
+        } else {
+            setRefreshCount((count) => count + 1)
+        }
+    }
 
     const copyToClipboard = async () => {
         try {
@@ -113,8 +143,8 @@ export function PkResolver({ publicKey }: { publicKey: string }) {
             </div>
 
             {/* DNS Records Table, No Records Message, or Client Error */}
-            {clientError ? (
-                <ClientError error={clientError} onRetry={retry} />
+            {(clientError || resolutionError) ? (
+                <ClientError error={clientError || resolutionError || "Unknown error"} onRetry={retryResolution} />
             ) : (clientLoading || loading) || pkarrPacket.records ? (
                 <div className="mb-6">
                     <div className="rounded-lg overflow-hidden">
@@ -151,7 +181,17 @@ export function PkResolver({ publicKey }: { publicKey: string }) {
             {/* Key Info - Below table with margin */}
             {pkarrPacket.records && (
                 <div className="mt-10 pt-6 border-t border-gray-700/30">
-                    <div className="flex justify-end space-x-8 text-sm">
+                    <div className="flex flex-wrap justify-end gap-8 text-sm">
+                        <div className="flex flex-col">
+                            <div className="text-gray-400 mb-1 text-xs uppercase tracking-wider">Resolve Policy</div>
+                            <div>
+                                {pkarrPacket.resolvePolicy ? (
+                                    <span className="text-sm font-normal text-gray-400">
+                                        {RESOLVE_POLICY_LABELS[pkarrPacket.resolvePolicy]}
+                                    </span>
+                                ) : 'Unknown'}
+                            </div>
+                        </div>
                         <div className="flex flex-col">
                             <div className="text-gray-400 mb-1 text-xs uppercase tracking-wider">Last Updated</div>
                             <div className="text-white font-medium">

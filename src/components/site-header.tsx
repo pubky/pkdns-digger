@@ -1,5 +1,6 @@
 import { Fingerprint, Github } from "lucide-react"
 import Link from "next/link"
+import { PkarrSettingsDialog } from "@/components/pkarr-settings-dialog"
 
 export function SiteHeader() {
   return (
@@ -13,10 +14,7 @@ export function SiteHeader() {
         </Link>
       </div>
       <div className="flex items-center space-x-4">
-        {/* <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-purple-500 group">
-          <Cog className="w-5 h-5" />
-        </Button>
-        <ThemeToggle /> */}
+        <PkarrSettingsDialog />
         <Link
           href="https://github.com/pubky/pkdns-digger"
           target="_blank"
@@ -29,4 +27,4 @@ export function SiteHeader() {
       </div>
     </header>
   )
-} 
+}
