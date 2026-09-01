@@ -4,11 +4,13 @@ import { Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { PkSearch } from "@/components/pages/landing/pk-search"
 import { PkResolver } from "@/components/pages/records/pk-resolver"
+import { extractPublicKey } from "@/lib/utils"
 
 function DomainDiggerContent() {
 
   const searchParams = useSearchParams()
-  const publicKey = searchParams.get('id')
+  const publicKeyParam = searchParams.get('id')
+  const publicKey = publicKeyParam ? extractPublicKey(publicKeyParam) : null
 
   // If no publicKey is provided, show the search interface
   if (!publicKey) {

@@ -59,3 +59,7 @@ export function deleteKey(key: string) {
   delete tagsMap[key]
   localStorage.setItem('pkarr-keys', JSON.stringify(tagsMap))
 }
+
+export function extractPublicKey(input: string): string {
+  return input.replace(/^(pk:\s*|pubky)/i, '').trim()
+}
