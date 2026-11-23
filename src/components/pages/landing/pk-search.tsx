@@ -8,11 +8,7 @@ import { KeyHistory } from "./key-history"
 import { KeyAlert } from "./key-alert"
 import { Header } from "./header"
 import { Utils } from "@synonymdev/pkarr"
-
-// Extract the raw public key by removing "pk:" or "pubky" prefix
-function extractPublicKey(input: string): string {
-  return input.replace(/^(pk:\s*|pubky)/i, '').trim()
-}
+import { extractPublicKey } from "@/lib/utils"
 
 export function PkSearch() {
   const [query, setQuery] = useState("")
