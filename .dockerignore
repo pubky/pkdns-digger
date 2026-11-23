@@ -1,0 +1,11 @@
+.git
+.github
+node_modules
+.next
+out
+coverage
+*.tsbuildinfo
+*.log
+.env*
+*.local
+gha-creds-*.json
