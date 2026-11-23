@@ -27,8 +27,8 @@ runs, using the shared `pubky/ci-workflows` actions.
 - Image tag: the Git commit SHA
 - Container port: `8080`
 
-The Dockerfile builds the existing Next.js static export and serves `out` with
-unprivileged Nginx. Unknown routes return the exported 404 page.
+The Dockerfile builds Next.js standalone output and runs its production Node.js
+server as a non-root user. Nginx is not required.
 
 Make the GitHub Actions secrets `GRC_INFRA_READ_WRITE` (Artifact Registry push
 credentials) and `CLOUDRUN_INFRA` (Cloud Run deployment credentials) available to
@@ -49,5 +49,5 @@ docker run --rm -p 8080:8080 pkdns-net
 
 Open `http://localhost:8080/`. To customize the default relay list, pass
 `--build-arg NEXT_PUBLIC_PKARR_RELAYS=https://relay1.example,https://relay2.example`
-to `docker build`. This public setting is baked into the static build; setting
+to `docker build`. This public setting is baked into the client bundle; setting
 it as a Cloud Run runtime environment variable does not change the site.

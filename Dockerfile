@@ -10,8 +10,17 @@ COPY . .
 ARG NEXT_PUBLIC_PKARR_RELAYS
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:stable-alpine AS runtime
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/out /usr/share/nginx/html
+FROM node:24-bookworm-slim AS runtime
+WORKDIR /app
 
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    HOSTNAME=0.0.0.0 \
+    PORT=8080
+
+COPY --from=build --chown=node:node /app/.next/standalone ./
+COPY --from=build --chown=node:node /app/.next/static ./.next/static
+
+USER node
 EXPOSE 8080
+CMD ["node", "server.js"]
